@@ -301,6 +301,7 @@ struct Input {
   int nSymbols;
   int nTapeSymbols;
   char entry[1024];
+  boolean valid;
 };
 
 struct Input
@@ -313,6 +314,7 @@ readInput(FILE* in) {
   char* tok;
   boolean validEntry = false, validOutput = false;
   Quintuple quint;
+  input.valid = true;
   fgets(buffer, BUFFER_SIZE, in);
   sscanf(buffer, "%d %d %d %d\n", &input.nStates, &input.nSymbols, &input.nTapeSymbols, &input.nTransitions);
   input.states = malloc(sizeof(*input.states) * input.nStates);
@@ -358,6 +360,7 @@ readInput(FILE* in) {
       if (!validOutput) 
         printf("%c character not in transition alphabet. ", quint.output);
       printf("\n");
+      input.valid = false;
     }
     input.transitions[i] = quint;
   }
@@ -366,6 +369,7 @@ readInput(FILE* in) {
   for (i = 0; i < strlen(input.entry); i++) {
     if (!strchr(input.alphabet, input.entry[i])) {
       printf("Character %c of entry does not belong to the tape alphabet.\n", input.entry[i]);
+      input.valid = false;
     }
   }
   return input;
@@ -379,6 +383,10 @@ main(int argn, char *argv[]) {
   int nextState;
   TuringMachine tm = {0};
   input = readInput(stdin);
+  if (!input.valid) {
+    printf("Invalid input\n");
+    return 1;
+  }
   quadruples = malloc(sizeof(*quadruples) * input.nTransitions * 2);
   nextState = input.states[input.nStates-1];
   for (i = 0; i < input.nTransitions; i++) {
