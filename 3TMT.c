@@ -2,27 +2,42 @@
 #include <stdlib.h>
 #include <string.h>
 
-/*#define PRINT_TAPES*/
-#define REVERSIBLE
+#define PRINT_TAPES
+#define NO_READ '/'
+#define SHIFT_LEFT '-'
+#define SHIFT_STAY '.'
+#define SHIFT_RIGHT '+'
+#define BLANK '\0'
 
 typedef char boolean;
 #define true (1 == 1)
 #define false (!true)
 
-#ifdef REVERSIBLE
-#undef NUM_TAPES
-#define NUM_TAPES 3
-#else
-#ifndef NUM_TAPES
-#define NUM_TAPES 1
-#endif /* NUM_TAPES */
-#endif /* REVERSIBLE */
+#define TAPE_NAMES \
+  X(INPUT) \
+  X(HISTORY) \
+  X(OUTPUT) 
 
-#define NO_READ '/'
-#define SHIFT_LEFT '-'
-#define SHIFT_STAY '0'
-#define SHIFT_RIGHT '+'
-#define BLANK '\0'
+enum TapeType {
+#define X(name) name,
+  TAPE_NAMES
+#undef X
+  NUM_TAPES
+};
+
+const char* tapeNames[NUM_TAPES] = {
+#define X(name) #name,
+  TAPE_NAMES
+#undef X
+};
+
+typedef struct Quintuple {
+  char entry;
+  char output;
+  int shift;
+  int entryState;
+  int outState;
+} Quintuple;
 
 typedef struct Tape {
   char* tape;
@@ -35,14 +50,6 @@ typedef struct Quadruple {
   int entryState;
   int outState;
 } Quadruple;
-
-typedef struct Quintuple {
-  char entry[NUM_TAPES];
-  char output[NUM_TAPES];
-  int shift[NUM_TAPES];
-  int entryState;
-  int outState;
-} Quintuple;
 
 
 typedef struct TuringMachine {
@@ -59,13 +66,18 @@ print4ple(Quadruple quad) {
   int i;
   printf("(%d, [", quad.entryState);
   for (i = 0; i < NUM_TAPES; i++) {
-    printf("%c ", quad.entry[i]);
+    printf("%d ", quad.entry[i]);
   }
   printf("]) -> (%d [", quad.outState);
   for (i = 0; i < NUM_TAPES; i++) {
-    printf("%c ", quad.output[i]);
+    printf("%d ", quad.output[i]);
   }
   printf("])\n");
+}
+
+void
+print5ple(Quintuple quint) {
+  printf("(%d %c) -> (%d %c %d)\n", quint.entryState, quint.entry, quint.outState, quint.output, quint.shift);
 }
 
 
@@ -124,14 +136,12 @@ validateTuringMachine(TuringMachine tm) {
       if (!validate4pleOverlap(tm.quadruples[i], tm.quadruples[j], &overlapsInRange, &overlapsInDomain)) {
         if (!overlapsInDomain) {
           printf("Quadruples %d and %d overlap in domain\n", i, j);
-          print4ple(tm.quadruples[i]);
-          print4ple(tm.quadruples[j]);
         }
         if (!overlapsInRange) {
           printf("Quadruples %d and %d overlap in range\n", i, j);
-          print4ple(tm.quadruples[i]);
-          print4ple(tm.quadruples[j]);
         }
+        print4ple(tm.quadruples[i]);
+        print4ple(tm.quadruples[j]);
         return false;
       }
     }
@@ -181,6 +191,7 @@ shouldRun4ple(TuringMachine* tm, Quadruple quad) {
   return true;
 }
 
+/*
 int
 convert5pleTo4ple(Quintuple quint, Quadruple quads[2], int nextState) {
   int i;
@@ -200,33 +211,32 @@ convert5pleTo4ple(Quintuple quint, Quadruple quads[2], int nextState) {
   quads[1].outState = quint.outState;
   return nextState;
 }
+*/
 
-#ifdef REVERSIBLE
 int 
 convert5pleToReversible4ple(Quintuple quint, Quadruple quads[2], int quintIndex, int nextState) {
   ++nextState;
   quads[0].entryState = quint.entryState;
-  quads[0].entry[0] = quint.entry[0];
-  quads[0].entry[1] = NO_READ;
-  quads[0].entry[2] = BLANK;
-  quads[0].output[0] = quint.output[0];
-  quads[0].output[1] = SHIFT_RIGHT;
-  quads[0].output[2] = BLANK;
+  quads[0].entry[INPUT] = quint.entry;
+  quads[0].entry[HISTORY] = NO_READ;
+  quads[0].entry[OUTPUT] = BLANK;
+  quads[0].output[INPUT] = quint.output;
+  quads[0].output[HISTORY] = SHIFT_RIGHT;
+  quads[0].output[OUTPUT] = BLANK;
   quads[0].outState = nextState;
 
   quads[1].entryState = nextState;
-  quads[1].entry[0] = NO_READ;
-  quads[1].entry[1] = BLANK;
-  quads[1].entry[2] = NO_READ;
-  if (quint.shift[0] < 0) quads[1].output[0] = SHIFT_LEFT;
-  else if (quint.shift[0] > 0) quads[1].output[0] = SHIFT_RIGHT;
-  else quads[1].output[0] = SHIFT_STAY;
-  quads[1].output[1] = quintIndex;
-  quads[1].output[2] = SHIFT_STAY;
-  quads[1].outState = nextState;
+  quads[1].entry[INPUT] = NO_READ;
+  quads[1].entry[HISTORY] = BLANK;
+  quads[1].entry[OUTPUT] = NO_READ;
+  if (quint.shift < 0)      quads[1].output[INPUT] = SHIFT_LEFT;
+  else if (quint.shift > 0) quads[1].output[INPUT] = SHIFT_RIGHT;
+  else                      quads[1].output[INPUT] = SHIFT_STAY;
+  quads[1].output[HISTORY] = quintIndex;
+  quads[1].output[OUTPUT] = SHIFT_STAY;
+  quads[1].outState = quint.outState;
   return nextState;
 }
-#endif
 
 
 boolean
@@ -262,7 +272,7 @@ turingMachineGo(TuringMachine* tm) {
     }
 #ifdef PRINT_TAPES
     for (i = 0; i < NUM_TAPES; i++) {
-      printf("Tape %2d: [", i);
+      printf("%s: [", tapeNames[i]);
       j = 0;
       while ((c = tm->tapes[i].tape[j])) {
         if (j == tm->tapes[i].head) {
@@ -280,46 +290,107 @@ turingMachineGo(TuringMachine* tm) {
   return -1; 
 }
 
-void
-readInput(FILE* in) {
 
+struct Input {
+  Quintuple* transitions;
+  int* states;
+  char* alphabet;
+  char* tapeSymbols;
+  int nStates;
+  int nTransitions;
+  int nSymbols;
+  int nTapeSymbols;
+  char entry[1024];
+};
+
+struct Input
+readInput(FILE* in) {
+  #define BUFFER_SIZE 1023
+  struct Input input;
+  int i;
+  char throwAway;
+  char buffer[BUFFER_SIZE+1];
+  char* tok;
+  boolean validEntry = false, validOutput = false;
+  Quintuple quint;
+  fgets(buffer, BUFFER_SIZE, in);
+  sscanf(buffer, "%d %d %d %d\n", &input.nStates, &input.nSymbols, &input.nTapeSymbols, &input.nTransitions);
+  input.states = malloc(sizeof(*input.states) * input.nStates);
+  fgets(buffer, BUFFER_SIZE, in);
+  tok = strtok(buffer, " ");
+  for (i = 0; i < input.nStates; i++) {
+    input.states[i] = atoi(tok);
+    tok = strtok(NULL, " ");
+  }
+
+  fgets(buffer, BUFFER_SIZE, in);
+  input.alphabet = malloc(input.nSymbols+1);
+  tok = strtok(buffer, " ");
+  for (i = 0; i < input.nSymbols; i++) {
+    input.alphabet[i] = tok[0];
+    tok = strtok(NULL, " ");
+  }
+  input.alphabet[input.nSymbols] = 0;
+
+  fgets(buffer, BUFFER_SIZE, in);
+  input.tapeSymbols = malloc(input.nTapeSymbols+1);
+  tok = strtok(buffer, " ");
+  for (i = 0; i < input.nTapeSymbols; i++) {
+    input.tapeSymbols[i] = tok[0];
+    tok = strtok(NULL, " ");
+  }
+  input.tapeSymbols[input.nTapeSymbols] = 0;
+  input.transitions = calloc(sizeof(*input.transitions), input.nTransitions);
+  for (i = 0; i < input.nTransitions; i++) {
+    fscanf(in, "(%d,%c)=(%d,%c,%c)\n", &quint.entryState, &quint.entry,  &quint.outState, &quint.output, &throwAway);
+    switch (throwAway) {
+    case 'L': quint.shift = -1; break;
+    case 'R': quint.shift = +1; break;
+    default:  break;
+    }
+    validEntry      = (strchr(input.tapeSymbols, quint.entry) != NULL);
+    validOutput     = (strchr(input.tapeSymbols, quint.output) != NULL);
+    if (!validEntry || !validOutput) {
+      print5ple(quint);
+      printf("5ple transition invalid: ");
+      if (!validEntry) 
+        printf("%c character not in transition alphabet. ", quint.entry);
+      if (!validOutput) 
+        printf("%c character not in transition alphabet. ", quint.output);
+      printf("\n");
+    }
+    input.transitions[i] = quint;
+  }
+  fgets(input.entry, BUFFER_SIZE, in);
+  input.entry[strlen(input.entry)-1] = 0;
+  for (i = 0; i < strlen(input.entry); i++) {
+    if (!strchr(input.alphabet, input.entry[i])) {
+      printf("Character %c of entry does not belong to the tape alphabet.\n", input.entry[i]);
+    }
+  }
+  return input;
 }
 
 int
 main(int argn, char *argv[]) {
   int i;
-  Quintuple quintuples[13] = {
-    {"a", "a", {+1}, 1, 1},
-    {"b", "b", {+1}, 1, 1},
-    {"#", "#", {+1}, 1, 1},
-    {"\0", "\0", {-1}, 1, 2},
-    {"a", "\0", {-1}, 2, 3},
-    {"b", "\0", {-1}, 2, 4},
-    {"#", "\0", {-1}, 2, 100},
-    {"a", "a", {-1}, 3, 3},
-    {"#", "a", {-1}, 3, 100},
-    {"b", "a", {-1}, 3, 4},
-    {"a", "b", {-1}, 4, 3},
-    {"#", "b", {-1}, 4, 100},
-    {"b", "b", {-1}, 4, 4},
-  };
-  Quadruple quadruples[26];
+  struct Input input;
+  Quadruple* quadruples;
+  int nextState;
   TuringMachine tm = {0};
-  int maxState = 0;
-  char entry[] = "abba#baab";
-  for (i = 0; i < 13; i++) {
-    maxState = quintuples[i].outState > maxState ? quintuples[i].outState : maxState;
+  input = readInput(stdin);
+  quadruples = malloc(sizeof(*quadruples) * input.nTransitions * 2);
+  nextState = input.states[input.nStates-1];
+  for (i = 0; i < input.nTransitions; i++) {
+    nextState = convert5pleToReversible4ple(input.transitions[i], quadruples + (i * 2), i, nextState);
   }
-  for (i = 0; i < 13; i++) {
-    maxState = convert5pleTo4ple(quintuples[i], quadruples + (i * 2), maxState);
-  }
-  if (!initTuringMachine(&tm, sizeof(quadruples)/sizeof(*quadruples), quadruples)) {
+  if (!initTuringMachine(&tm, input.nTransitions * 2, quadruples)) {
     printf("Invalid turing machine\n");
-    /*return 1;*/
+    return 1;
   }
-  memcpy(tm.tapes[0].tape, entry, sizeof(entry));
-  tm.state = 1;
-  tm.acceptState = 100;
+  memcpy(tm.tapes[0].tape, input.entry, strlen(input.entry));
+  tm.state = input.states[0];
+  tm.acceptState = input.states[input.nStates-1];
   if (turingMachineGo(&tm)) {
     printf("Accept\n");
   } else {
