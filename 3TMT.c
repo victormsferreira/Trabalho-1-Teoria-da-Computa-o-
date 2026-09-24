@@ -13,30 +13,68 @@ typedef char boolean;
 #define true (1 == 1)
 #define false (!true)
 
-#define TAPE_NAMES \
+#define TAPES \
   X(INPUT) \
   X(HISTORY) \
   X(OUTPUT) 
 
 enum TapeType {
 #define X(name) name,
-  TAPE_NAMES
+  TAPES
 #undef X
   NUM_TAPES
 };
 
 const char* tapeNames[NUM_TAPES] = {
 #define X(name) #name,
-  TAPE_NAMES
+  TAPES
 #undef X
 };
+
+typedef struct State {
+  enum {
+    A,
+    Ap,
+    B,
+    Bp,
+    C,
+    Cp
+  } stage;
+  int num;
+} State;
+
+void
+printState(State s) {
+  const char* stageNames = "ABC";
+  printf("%c", stageNames[s.stage/2]);
+  if (s.stage % 2) printf("'");
+  printf("%d", s.num);
+}
+
+typedef struct Symbol {
+  enum {
+    SHIFT,
+    NUMBER,
+    SYMBOL
+  } type;
+  union {
+    enum {
+      SHLFT,
+      SHRGT,
+      SHSTY
+    } shift;
+    int number;
+    int symbolIndex;
+  } value;
+} Symbol;
 
 typedef struct Quintuple {
   char entry;
   char output;
   int shift;
-  int entryState;
-  int outState;
+  State entryState;
+  State outState;
+  int m;
 } Quintuple;
 
 typedef struct Tape {
@@ -47,37 +85,50 @@ typedef struct Tape {
 typedef struct Quadruple {
   char entry[NUM_TAPES];
   char output[NUM_TAPES];
-  int entryState;
-  int outState;
+  State entryState;
+  State outState;
 } Quadruple;
-
 
 typedef struct TuringMachine {
   Tape tapes[NUM_TAPES];
   Quadruple* quadruples;
   int quadruplesSize;
   int tapeSize;
-  int state;
-  int acceptState;
+  State state;
+  State acceptState;
 } TuringMachine;
 
 void
 print4ple(Quadruple quad) {
   int i;
-  printf("(%d, [", quad.entryState);
+  printState(quad.entryState);
+  printf("[");
   for (i = 0; i < NUM_TAPES; i++) {
+    if (i == 1)
     printf("%d ", quad.entry[i]);
+    else
+    printf("%c ", quad.entry[i] ? quad.entry[i] : 'B');
   }
-  printf("]) -> (%d [", quad.outState);
+  printf("] -> [");
+
   for (i = 0; i < NUM_TAPES; i++) {
+    if (i == 1)
     printf("%d ", quad.output[i]);
+    else
+    printf("%c ", quad.output[i] ? quad.output[i] : 'B');
   }
-  printf("])\n");
+  printf("]");
+  printState(quad.outState);
+  printf("\n");
 }
 
 void
 print5ple(Quintuple quint) {
-  printf("(%d %c) -> (%d %c %d)\n", quint.entryState, quint.entry, quint.outState, quint.output, quint.shift);
+  printf("(");
+  printState(quint.entryState);
+  printf(" %c) -> (", quint.entry);
+  printState(quint.outState);
+  printf("%c %d)\n", quint.output, quint.shift);
 }
 
 
@@ -95,9 +146,14 @@ validate4ple(Quadruple quad) {
 }
 
 boolean
+statesEqual(State a, State b) {
+  return (a.stage == b.stage) && (a.num == b.num);
+}
+
+boolean
 validate4pleDomainOverlap(Quadruple a, Quadruple b) {
   int i;
-  if (a.entryState != b.entryState) return true;
+  if (!statesEqual(a.entryState, b.entryState)) return true;
   for (i = 0; i < NUM_TAPES; i++) {
     if ((a.entry[i] != b.entry[i]) && (a.entry[i] != NO_READ) && (b.entry[i] != NO_READ)) return true;
   }
@@ -107,7 +163,7 @@ validate4pleDomainOverlap(Quadruple a, Quadruple b) {
 boolean
 validate4pleRangeOverlap(Quadruple a, Quadruple b) {
   int i;
-  if (a.outState != b.outState) return true;
+  if (!statesEqual(a.outState, b.outState)) return true;
   for (i = 0; i < NUM_TAPES; i++) {
     if ((a.output[i] != b.output[i]) && (a.entry[i] != NO_READ) && (b.entry[i] != NO_READ)) return true;
   }
@@ -151,13 +207,15 @@ validateTuringMachine(TuringMachine tm) {
 
 void
 tapeWrite(Tape* tape, char c) {
-  tape->tape[tape->head] = c;
+  if (tape->head > 0)
+    tape->tape[tape->head-1] = c;
 }
 
 boolean
 tapeRead(Tape* tape, char expected) {
   if (expected == NO_READ) return true;
-  return tape->tape[tape->head] == expected;
+  if (tape->head <= 0) return BLANK == expected;
+  return tape->tape[tape->head-1] == expected;
 }
 
 void
@@ -184,7 +242,7 @@ apply4ple(TuringMachine* tm, Quadruple* quad) {
 boolean
 shouldRun4ple(TuringMachine* tm, Quadruple quad) {
   int i;
-  if (tm->state != quad.entryState) return false;
+  if (!statesEqual(tm->state, quad.entryState)) return false;
   for (i = 0; i < NUM_TAPES; i++) {
     if (!tapeRead(tm->tapes+i, quad.entry[i])) return false;
   }
@@ -213,9 +271,8 @@ convert5pleTo4ple(Quintuple quint, Quadruple quads[2], int nextState) {
 }
 */
 
-int 
-convert5pleToReversible4ple(Quintuple quint, Quadruple quads[2], int quintIndex, int nextState) {
-  ++nextState;
+void
+convert5pleToReversible4ple(Quintuple quint, Quadruple quads[2]) {
   quads[0].entryState = quint.entryState;
   quads[0].entry[INPUT] = quint.entry;
   quads[0].entry[HISTORY] = NO_READ;
@@ -223,19 +280,45 @@ convert5pleToReversible4ple(Quintuple quint, Quadruple quads[2], int quintIndex,
   quads[0].output[INPUT] = quint.output;
   quads[0].output[HISTORY] = SHIFT_RIGHT;
   quads[0].output[OUTPUT] = BLANK;
-  quads[0].outState = nextState;
+  quads[0].outState.stage = Ap;
+  quads[0].outState.num = quint.m;
 
-  quads[1].entryState = nextState;
+  quads[1].entryState = quads[0].outState;
   quads[1].entry[INPUT] = NO_READ;
   quads[1].entry[HISTORY] = BLANK;
   quads[1].entry[OUTPUT] = NO_READ;
   if (quint.shift < 0)      quads[1].output[INPUT] = SHIFT_LEFT;
   else if (quint.shift > 0) quads[1].output[INPUT] = SHIFT_RIGHT;
   else                      quads[1].output[INPUT] = SHIFT_STAY;
-  quads[1].output[HISTORY] = quintIndex;
+  quads[1].output[HISTORY] = quint.m;
   quads[1].output[OUTPUT] = SHIFT_STAY;
   quads[1].outState = quint.outState;
-  return nextState;
+}
+
+void
+convert5pleToInverse4ple(Quintuple quint, Quadruple quads[2]) {
+  quads[0].entry[INPUT] = NO_READ;
+  quads[0].entry[HISTORY] = quint.m;
+  quads[0].entry[OUTPUT] = NO_READ;
+  if (quint.shift > 0)      quads[0].output[INPUT] = SHIFT_LEFT;
+  else if (quint.shift < 0) quads[0].output[INPUT] = SHIFT_RIGHT;
+  else                      quads[0].output[INPUT] = SHIFT_STAY;
+  quads[0].output[HISTORY] = BLANK;
+  quads[0].output[OUTPUT] = SHIFT_STAY;
+  quads[0].entryState.stage = C;
+  quads[0].entryState.num = quint.outState.num;
+  quads[0].outState.stage = Cp;
+  quads[0].outState.num = quint.m;
+
+  quads[1].entryState = quads[0].outState;
+  quads[1].entry[INPUT] = quint.output;
+  quads[1].entry[HISTORY] = NO_READ;
+  quads[1].entry[OUTPUT] = BLANK;
+  quads[1].output[INPUT] = quint.entry;
+  quads[1].output[HISTORY] = SHIFT_LEFT;
+  quads[1].output[OUTPUT] = BLANK;
+  quads[1].outState.stage = C;
+  quads[1].outState.num = quint.entryState.num;
 }
 
 
@@ -262,6 +345,30 @@ turingMachineGo(TuringMachine* tm) {
   char c;
 #endif
   while (true) {
+#ifdef PRINT_TAPES
+    for (i = 0; i < NUM_TAPES; i++) {
+      printf("%s: [", tapeNames[i]);
+      j = 0;
+      while (j < 32) {
+        c = tm->tapes[i].tape[j];
+        if (j == tm->tapes[i].head) {
+          printf("(");
+          printState(tm->state);
+          printf(")");
+        }
+        if (c) {
+          if (i == HISTORY)
+            printf("%d ", c);
+          else
+            printf("%c", c);
+        } else {
+          printf(" ");
+        }
+        j++;
+      }
+      printf("]\n");
+    }
+#endif
     reject = true;
     for (i = 0; i < tm->quadruplesSize; i++) {
       if (shouldRun4ple(tm, tm->quadruples[i])) {
@@ -270,21 +377,33 @@ turingMachineGo(TuringMachine* tm) {
         break;
       }
     }
+    if (statesEqual(tm->state, tm->acceptState)) {
 #ifdef PRINT_TAPES
-    for (i = 0; i < NUM_TAPES; i++) {
-      printf("%s: [", tapeNames[i]);
-      j = 0;
-      while ((c = tm->tapes[i].tape[j])) {
-        if (j == tm->tapes[i].head) {
-          printf("(q%d)", tm->state);
+      for (i = 0; i < NUM_TAPES; i++) {
+        printf("%s: [", tapeNames[i]);
+        j = 0;
+        while (j < 32) {
+          c = tm->tapes[i].tape[j];
+          if (j == tm->tapes[i].head) {
+            printf("(");
+            printState(tm->state);
+            printf(")");
+          }
+          if (c) {
+            if (i == HISTORY)
+              printf("%d ", c);
+            else
+              printf("%c", c);
+          } else {
+            printf(" ");
+          }
+          j++;
         }
-        printf("%c", c);
-        j++;
+        printf("]\n");
       }
-      printf("]\n");
-    }
 #endif
-    if (tm->state == tm->acceptState) return 1;
+      return 1;
+    }
     if (reject) return 0;
   }
   return -1; 
@@ -293,7 +412,7 @@ turingMachineGo(TuringMachine* tm) {
 
 struct Input {
   Quintuple* transitions;
-  int* states;
+  State* states;
   char* alphabet;
   char* tapeSymbols;
   int nStates;
@@ -317,13 +436,19 @@ readInput(FILE* in) {
   input.valid = true;
   fgets(buffer, BUFFER_SIZE, in);
   sscanf(buffer, "%d %d %d %d\n", &input.nStates, &input.nSymbols, &input.nTapeSymbols, &input.nTransitions);
+  input.nStates += 2;
   input.states = malloc(sizeof(*input.states) * input.nStates);
   fgets(buffer, BUFFER_SIZE, in);
   tok = strtok(buffer, " ");
-  for (i = 0; i < input.nStates; i++) {
-    input.states[i] = atoi(tok);
+  for (i = 0; i < input.nStates-2; i++) {
+    input.states[i+1].stage = A;
+    input.states[i+1].num = atoi(tok);
     tok = strtok(NULL, " ");
   }
+  input.states[0].stage = A;
+  input.states[0].num = 0;
+  input.states[input.nStates-1].stage = A;
+  input.states[input.nStates-1].num = input.states[input.nStates-2].num+1;
 
   fgets(buffer, BUFFER_SIZE, in);
   input.alphabet = malloc(input.nSymbols+1);
@@ -342,14 +467,17 @@ readInput(FILE* in) {
     tok = strtok(NULL, " ");
   }
   input.tapeSymbols[input.nTapeSymbols] = 0;
-  input.transitions = calloc(sizeof(*input.transitions), input.nTransitions);
+  input.transitions = calloc(sizeof(*input.transitions), input.nTransitions + 2);
   for (i = 0; i < input.nTransitions; i++) {
-    fscanf(in, "(%d,%c)=(%d,%c,%c)\n", &quint.entryState, &quint.entry,  &quint.outState, &quint.output, &throwAway);
+    fscanf(in, "(%d,%c)=(%d,%c,%c)\n", &quint.entryState.num, &quint.entry,  &quint.outState.num, &quint.output, &throwAway);
     switch (throwAway) {
     case 'L': quint.shift = -1; break;
     case 'R': quint.shift = +1; break;
-    default:  break;
+    default:  quint.shift = 0; break;
     }
+    if (quint.entry == 'B') quint.entry = BLANK;
+    if (quint.output == 'B') quint.output = BLANK;
+    quint.entryState.stage = quint.outState.stage = A;
     validEntry      = (strchr(input.tapeSymbols, quint.entry) != NULL);
     validOutput     = (strchr(input.tapeSymbols, quint.output) != NULL);
     if (!validEntry || !validOutput) {
@@ -362,7 +490,8 @@ readInput(FILE* in) {
       printf("\n");
       input.valid = false;
     }
-    input.transitions[i] = quint;
+    quint.m = i + 2;
+    input.transitions[i+1] = quint;
   }
   fgets(input.entry, BUFFER_SIZE, in);
   input.entry[strlen(input.entry)-1] = 0;
@@ -372,33 +501,117 @@ readInput(FILE* in) {
       input.valid = false;
     }
   }
+  quint.entryState = input.states[0];
+  quint.outState = input.states[1];
+  quint.entry = BLANK;
+  quint.output = BLANK;
+  quint.shift = +1;
+  quint.m = 1;
+  input.transitions[0] = quint;
+
+  quint.entryState = input.states[input.nStates-2];
+  quint.outState = input.states[input.nStates-1];
+  quint.entry = BLANK;
+  quint.output = BLANK;
+  quint.shift = 0;
+  quint.m = input.nTransitions + 2;
+  input.transitions[input.nTransitions+1] = quint;
+
+  input.nTransitions += 2;
   return input;
+}
+
+TuringMachine
+makeReversible(struct Input input) {
+  #define PUSH_4PLE(e0, e1, e2, o0, o1, o2, es, os) { \
+  quadruples[nextQuadruple].entry[0] = e0; \
+  quadruples[nextQuadruple].entry[1] = e1; \
+  quadruples[nextQuadruple].entry[2] = e2; \
+  quadruples[nextQuadruple].output[0] = o0; \
+  quadruples[nextQuadruple].output[1] = o1; \
+  quadruples[nextQuadruple].output[2] = o2; \
+  quadruples[nextQuadruple].entryState = es; \
+  quadruples[nextQuadruple].outState= os; \
+  nextQuadruple++; \
+  }
+
+
+  const int N = input.nTransitions;
+  const int Z = input.nTapeSymbols;
+  const State Af = input.states[input.nStates-1];
+  const State b1p = { Bp, 1 };
+  const State b1 = { B, 1 };
+  const State b2p = { Bp, 2 };
+  const State b2 = { B, 2 };
+  State cf = { C };
+  Quadruple* quadruples;
+  TuringMachine tm = {0};
+  int nextQuadruple = 0;
+  int i;
+  char x;
+  cf.num = Af.num;
+  quadruples = malloc(sizeof(*quadruples) * (4 * N + 2 * Z + 3));
+  /* Create Stage 1 (Compute) quadruples */
+  for (i = 0; i < N; i++) {
+    convert5pleToReversible4ple(input.transitions[i], quadruples + (i * 2));
+  }
+  nextQuadruple = N * 2;
+
+  /* Create Stage 2 (Copy output) quadruples */
+  PUSH_4PLE(BLANK, N, BLANK, BLANK, N, BLANK, Af, b1p); /* Af[b N b] -> [b N b]B1' */
+
+  PUSH_4PLE(NO_READ, NO_READ, NO_READ, SHIFT_RIGHT, SHIFT_STAY, SHIFT_RIGHT, b1p,  b1);  /* B1'[/ / /] -> [+ 0 +]B1 */
+  for (i = 0; i < Z; i++) {
+    x = input.tapeSymbols[i];
+    /* x != b : { B1[x N b] -> [x N x]B1' } */
+    if (x != 'B') {
+      PUSH_4PLE(x, N, BLANK, x, N, x, b1, b1p);
+    }
+  }
+  PUSH_4PLE(BLANK, N, BLANK, BLANK, N, BLANK, b1, b2p); /* B1[ b N b] -> [b N b]B2' */
+  PUSH_4PLE(NO_READ, NO_READ, NO_READ, SHIFT_LEFT, SHIFT_STAY, SHIFT_LEFT, b2p, b2); /* B2'[/ / /] -> [- 0 -]B2 */
+  for (i = 0; i < Z; i++) {
+    x = input.tapeSymbols[i];
+    /* x != b : { B2[x N x] -> [x N x]B2' } */
+    if (x != 'B') {
+      PUSH_4PLE(x, N, x, x, N, x, b2, b2p);
+    }
+  }
+
+  PUSH_4PLE(BLANK, N, BLANK, BLANK, N, BLANK, b2, cf); /* B2[b N b] -> [b N b]Cf */
+
+  /* Create Stage 3 (Retrace) quadruples */
+  for (i = N; i > 0; i--) {
+    convert5pleToInverse4ple(input.transitions[i-1], quadruples + nextQuadruple);
+    nextQuadruple += 2;
+  }
+  tm.state.stage = A; tm.state.num = 0;
+  tm.acceptState.stage = C; tm.acceptState.num = 0;
+  for (i = 0; i < (4 * N + 2 * Z + 3); i++) {
+    print4ple(quadruples[i]);
+  }
+  if (!initTuringMachine(&tm, (4 * N + 2 * Z + 3), quadruples)) {
+    printf("Invalid turing machine\n");
+    free(quadruples);
+    tm.quadruplesSize = 0;
+  }
+  return tm;
 }
 
 int
 main(int argn, char *argv[]) {
-  int i;
-  struct Input input;
-  Quadruple* quadruples;
-  int nextState;
-  TuringMachine tm = {0};
+  struct Input input = {0};
+  TuringMachine tm =  {0};
   input = readInput(stdin);
   if (!input.valid) {
     printf("Invalid input\n");
     return 1;
   }
-  quadruples = malloc(sizeof(*quadruples) * input.nTransitions * 2);
-  nextState = input.states[input.nStates-1];
-  for (i = 0; i < input.nTransitions; i++) {
-    nextState = convert5pleToReversible4ple(input.transitions[i], quadruples + (i * 2), i, nextState);
-  }
-  if (!initTuringMachine(&tm, input.nTransitions * 2, quadruples)) {
-    printf("Invalid turing machine\n");
+  tm = makeReversible(input);
+  if (tm.quadruplesSize == 0) {
     return 1;
   }
   memcpy(tm.tapes[0].tape, input.entry, strlen(input.entry));
-  tm.state = input.states[0];
-  tm.acceptState = input.states[input.nStates-1];
   if (turingMachineGo(&tm)) {
     printf("Accept\n");
   } else {
