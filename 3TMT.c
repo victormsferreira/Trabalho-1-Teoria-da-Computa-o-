@@ -38,7 +38,8 @@ typedef struct State {
     B,
     Bp,
     C,
-    Cp
+    Cp,
+    F,
   } stage;
   int num;
 } State;
@@ -207,15 +208,15 @@ validateTuringMachine(TuringMachine tm) {
 
 void
 tapeWrite(Tape* tape, char c) {
-  if (tape->head > 0)
-    tape->tape[tape->head-1] = c;
+  if (tape->head >= 0)
+    tape->tape[tape->head] = c;
 }
 
 boolean
 tapeRead(Tape* tape, char expected) {
   if (expected == NO_READ) return true;
-  if (tape->head <= 0) return BLANK == expected;
-  return tape->tape[tape->head-1] == expected;
+  if (tape->head < 0) return BLANK == expected;
+  return tape->tape[tape->head] == expected;
 }
 
 void
@@ -436,17 +437,24 @@ readInput(FILE* in) {
   input.valid = true;
   fgets(buffer, BUFFER_SIZE, in);
   sscanf(buffer, "%d %d %d %d\n", &input.nStates, &input.nSymbols, &input.nTapeSymbols, &input.nTransitions);
-  input.nStates += 2;
+  input.nTapeSymbols += 1;
+  input.nStates += 4;
   input.states = malloc(sizeof(*input.states) * input.nStates);
   fgets(buffer, BUFFER_SIZE, in);
   tok = strtok(buffer, " ");
-  for (i = 0; i < input.nStates-2; i++) {
+  for (i = 0; i < input.nStates-4; i++) {
     input.states[i+1].stage = A;
     input.states[i+1].num = atoi(tok);
     tok = strtok(NULL, " ");
   }
   input.states[0].stage = A;
   input.states[0].num = 0;
+  input.states[input.nStates-3].stage = A;
+  input.states[input.nStates-3].num = input.states[input.nStates-4].num+1;
+
+  input.states[input.nStates-2].stage = A;
+  input.states[input.nStates-2].num = input.states[input.nStates-3].num+1;
+
   input.states[input.nStates-1].stage = A;
   input.states[input.nStates-1].num = input.states[input.nStates-2].num+1;
 
@@ -462,12 +470,13 @@ readInput(FILE* in) {
   fgets(buffer, BUFFER_SIZE, in);
   input.tapeSymbols = malloc(input.nTapeSymbols+1);
   tok = strtok(buffer, " ");
-  for (i = 0; i < input.nTapeSymbols; i++) {
+  for (i = 0; i < input.nTapeSymbols-1; i++) {
     input.tapeSymbols[i] = tok[0];
     tok = strtok(NULL, " ");
   }
+  input.tapeSymbols[input.nTapeSymbols-1] = 0xff;
   input.tapeSymbols[input.nTapeSymbols] = 0;
-  input.transitions = calloc(sizeof(*input.transitions), input.nTransitions + 2);
+  input.transitions = calloc(sizeof(*input.transitions), input.nTransitions + 3 + input.nTapeSymbols);
   for (i = 0; i < input.nTransitions; i++) {
     fscanf(in, "(%d,%c)=(%d,%c,%c)\n", &quint.entryState.num, &quint.entry,  &quint.outState.num, &quint.output, &throwAway);
     switch (throwAway) {
@@ -504,20 +513,52 @@ readInput(FILE* in) {
   quint.entryState = input.states[0];
   quint.outState = input.states[1];
   quint.entry = BLANK;
-  quint.output = BLANK;
+  quint.output = 0xff;
   quint.shift = +1;
   quint.m = 1;
   input.transitions[0] = quint;
+
+  quint.entryState = input.states[input.nStates-4];
+  quint.outState = input.states[input.nStates-3];
+  quint.entry = BLANK;
+  quint.output = BLANK;
+  quint.shift = -1;
+  quint.m = input.nTransitions + 2;
+  input.transitions[input.nTransitions+1] = quint;
+
+  for (i = 0; i < input.nTapeSymbols-1; i++) {
+    quint.entryState = input.states[input.nStates-3];
+    if (input.tapeSymbols[i] != 'B') {
+      quint.outState = input.states[input.nStates-3];
+      quint.shift = -1;
+      quint.entry = input.tapeSymbols[i];
+      quint.output = input.tapeSymbols[i];
+    } else {
+      quint.outState = input.states[input.nStates-3];
+      quint.shift = -1;
+      quint.entry = BLANK;
+      quint.output = BLANK;
+    }
+    quint.m = input.nTransitions + 3 + i;
+    input.transitions[input.nTransitions+2+i] = quint;
+  }
+  quint.entryState = input.states[input.nStates-3];
+  quint.outState = input.states[input.nStates-2];
+  quint.shift = 0;
+  quint.entry = 0xff;
+  quint.output = BLANK;
+  quint.m = input.nTransitions + 2 + input.nTapeSymbols;
+  input.transitions[input.nTransitions+1+input.nTapeSymbols] = quint;
 
   quint.entryState = input.states[input.nStates-2];
   quint.outState = input.states[input.nStates-1];
   quint.entry = BLANK;
   quint.output = BLANK;
   quint.shift = 0;
-  quint.m = input.nTransitions + 2;
-  input.transitions[input.nTransitions+1] = quint;
+  quint.m = input.nTransitions + 3 + input.nTapeSymbols;
+  input.transitions[input.nTransitions + 2 + input.nTapeSymbols] = quint;
 
-  input.nTransitions += 2;
+  input.nTransitions += 3 + input.nTapeSymbols;
   return input;
 }
 
@@ -611,7 +652,7 @@ main(int argn, char *argv[]) {
   if (tm.quadruplesSize == 0) {
     return 1;
   }
-  memcpy(tm.tapes[0].tape, input.entry, strlen(input.entry));
+  memcpy(tm.tapes[0].tape+1, input.entry, strlen(input.entry));
   if (turingMachineGo(&tm)) {
     printf("Accept\n");
   } else {
