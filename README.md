@@ -6,9 +6,9 @@
                         ┌──────┐                         
                         │  S   │                         
                    ┌────└──────┘────┐           ┌───────┐
-                   │     ┌────┐     │           │  \*\*<  │
+                   │     ┌────┐     │           │  **<  │
 ┌────┐             │     │    │     │           │       │
-│    │  B$>        │┌──┐ │    │ ┌──┐│   \*\*<   ┌─┼──┐    │
+│    │  B$>        │┌──┐ │    │ ┌──┐│    **<  ┌─┼──┐    │
 │ A0 ┼────────────►││S0├─►    ├─►Sf├┼────────►│ A1 │◄───┘
 │    │             │└──┘ │    │ └─┬┘│         └─┬──┘     
 └────┘             │     │    │   │ │           │        
@@ -26,7 +26,7 @@ Dada uma máquina de turing padrão S, o artigo de Bennett diz que sua entrada e
 
 * O resto da fita está vazio
 * Não há espaços em brancos no meio da entrada/saída
-* \*\*\*A cabeça da fita está na no espaço em branco imediatatemente a esquerda da entrada/saída\*\*\*
+* ***A cabeça da fita está na no espaço em branco imediatatemente a esquerda da entrada/saída***
 
 Esse último ponto é importante, pois, após o final do primeiro estágio da Máquina de Turing Reversível de 3 estágios, assume-se que a saída é padrão, o que é crucial para que segundo estágio, onde a sáida é copiada para a terceira fita, rode corretamente.
 
