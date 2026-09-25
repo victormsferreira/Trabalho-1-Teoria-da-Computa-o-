@@ -6,7 +6,7 @@
 static enum RuntimeFlags {
   PRINT = 1 << 0,
   GRAPHICS = 1 << 2,
-} runtimeFlags = GRAPHICS;
+} runtimeFlags = 0;
 
 /* Special Characters */
 #define NO_READ '/'
@@ -815,6 +815,7 @@ checkForFlags(int argn, const char* argv[]) {
   int i;
   for (i = 0; i < argn; i++) {
     if (argv[i][0] == 'p') runtimeFlags |= PRINT;
+    if (argv[i][0] == 'g') runtimeFlags |= PRINT;
   }
 }
 
