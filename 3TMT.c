@@ -2,33 +2,28 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define PRINT_TAPES
+static enum RuntimeFlags {
+  PRINT = 1
+} runtimeFlags = 0;
+
+/* Special Characters */
 #define NO_READ '/'
 #define SHIFT_LEFT '-'
 #define SHIFT_STAY '.'
 #define SHIFT_RIGHT '+'
 #define BLANK '\0'
+#define IO_START ((char)0xff)
 
 typedef char boolean;
 #define true (1 == 1)
 #define false (!true)
 
-#define TAPES \
-  X(INPUT) \
-  X(HISTORY) \
-  X(OUTPUT) 
 
 enum TapeType {
-#define X(name) name,
-  TAPES
-#undef X
+  INPUT,
+  HISTORY,
+  OUTPUT,
   NUM_TAPES
-};
-
-const char* tapeNames[NUM_TAPES] = {
-#define X(name) #name,
-  TAPES
-#undef X
 };
 
 typedef struct State {
@@ -38,8 +33,7 @@ typedef struct State {
     B,
     Bp,
     C,
-    Cp,
-    F,
+    Cp
   } stage;
   int num;
 } State;
@@ -52,11 +46,12 @@ printState(State s) {
   printf("%d", s.num);
 }
 
-typedef struct Symbol {
+typedef struct Value {
   enum {
     SHIFT,
     NUMBER,
-    SYMBOL
+    SYMBOL,
+    SPECIAL
   } type;
   union {
     enum {
@@ -67,7 +62,7 @@ typedef struct Symbol {
     int number;
     int symbolIndex;
   } value;
-} Symbol;
+} Value;
 
 typedef struct Quintuple {
   char entry;
@@ -98,6 +93,12 @@ typedef struct TuringMachine {
   State state;
   State acceptState;
 } TuringMachine;
+
+void
+fatalError(const char* message, int exitCode) {
+  fprintf(stderr, "ERROR: %s\n", message);
+  exit(exitCode);
+}
 
 void
 print4ple(Quadruple quad) {
@@ -138,9 +139,9 @@ validate4ple(Quadruple quad) {
   int i;
   for (i = 0; i < NUM_TAPES; i++) {
     if (quad.entry[i] != NO_READ) {
-      if (quad.entry[i] == SHIFT_LEFT) return false;
-      if (quad.entry[i] == SHIFT_STAY) return false;
-      if (quad.entry[i] == SHIFT_RIGHT) return false;
+      if (quad.output[i] == SHIFT_LEFT) return false;
+      if (quad.output[i] == SHIFT_STAY) return false;
+      if (quad.output[i] == SHIFT_RIGHT) return false;
     }
   }
   return true;
@@ -208,14 +209,19 @@ validateTuringMachine(TuringMachine tm) {
 
 void
 tapeWrite(Tape* tape, char c) {
-  if (tape->head >= 0)
+  if (tape->head >= 0) {
     tape->tape[tape->head] = c;
+  } else {
+    fatalError("Trying to write out of bounds", 2);
+  }
 }
 
 boolean
 tapeRead(Tape* tape, char expected) {
   if (expected == NO_READ) return true;
-  if (tape->head < 0) return BLANK == expected;
+  if (tape->head < 0) {
+    fatalError("Trying to read out of bounds", 1);
+  }
   return tape->tape[tape->head] == expected;
 }
 
@@ -250,27 +256,6 @@ shouldRun4ple(TuringMachine* tm, Quadruple quad) {
   return true;
 }
 
-/*
-int
-convert5pleTo4ple(Quintuple quint, Quadruple quads[2], int nextState) {
-  int i;
-  ++nextState;
-  quads[0].entryState = quint.entryState;
-  memcpy(quads[0].entry, quint.entry, sizeof(*quint.entry) * NUM_TAPES);
-  memcpy(quads[0].output, quint.output, sizeof(*quint.output) * NUM_TAPES);
-  quads[0].outState = nextState;
-
-  quads[1].entryState = nextState;
-  memset(quads[1].entry, NO_READ, sizeof(*quads[1].entry) * NUM_TAPES);
-  for (i = 0; i < NUM_TAPES; i++) {
-    if (quint.shift[i] < 0) quads[1].output[i] = SHIFT_LEFT;
-    else if (quint.shift[i] > 0) quads[1].output[i] = SHIFT_RIGHT;
-    else quads[1].output[i] = SHIFT_STAY;
-  }
-  quads[1].outState = quint.outState;
-  return nextState;
-}
-*/
 
 void
 convert5pleToReversible4ple(Quintuple quint, Quadruple quads[2]) {
@@ -337,39 +322,42 @@ initTuringMachine(TuringMachine* tm, int nRules, Quadruple* quadruples) {
   return validateTuringMachine(*tm);
 }
 
+
+void
+turingMachinePrint(TuringMachine* tm) {
+  const char* tapeNames[NUM_TAPES] = { "INPUT", "HISTORY", "OUTPUT" };
+  int i, j;
+  char c;
+  for (i = 0; i < NUM_TAPES; i++) {
+    printf("%s: [", tapeNames[i]);
+    j = 0;
+    while (j < 32) {
+      c = tm->tapes[i].tape[j];
+      if (j == tm->tapes[i].head) {
+        printf("(");
+        printState(tm->state);
+        printf(")");
+      }
+      if (c) {
+        if (i == HISTORY)
+          printf("%d ", c);
+        else
+          printf("%c", c);
+      } else {
+        printf(" ");
+      }
+      j++;
+    }
+    printf("]\n");
+  }
+}
+
 int
 turingMachineGo(TuringMachine* tm) {
   boolean reject = false;
-  int i;
-#ifdef PRINT_TAPES
-  int j;
-  char c;
-#endif
+  int i, j;
+  if (runtimeFlags & PRINT) turingMachinePrint(tm);
   while (true) {
-#ifdef PRINT_TAPES
-    for (i = 0; i < NUM_TAPES; i++) {
-      printf("%s: [", tapeNames[i]);
-      j = 0;
-      while (j < 32) {
-        c = tm->tapes[i].tape[j];
-        if (j == tm->tapes[i].head) {
-          printf("(");
-          printState(tm->state);
-          printf(")");
-        }
-        if (c) {
-          if (i == HISTORY)
-            printf("%d ", c);
-          else
-            printf("%c", c);
-        } else {
-          printf(" ");
-        }
-        j++;
-      }
-      printf("]\n");
-    }
-#endif
     reject = true;
     for (i = 0; i < tm->quadruplesSize; i++) {
       if (shouldRun4ple(tm, tm->quadruples[i])) {
@@ -378,34 +366,22 @@ turingMachineGo(TuringMachine* tm) {
         break;
       }
     }
+    if (runtimeFlags & PRINT) turingMachinePrint(tm);
     if (statesEqual(tm->state, tm->acceptState)) {
-#ifdef PRINT_TAPES
-      for (i = 0; i < NUM_TAPES; i++) {
-        printf("%s: [", tapeNames[i]);
-        j = 0;
-        while (j < 32) {
-          c = tm->tapes[i].tape[j];
-          if (j == tm->tapes[i].head) {
-            printf("(");
-            printState(tm->state);
-            printf(")");
-          }
-          if (c) {
-            if (i == HISTORY)
-              printf("%d ", c);
-            else
-              printf("%c", c);
-          } else {
-            printf(" ");
-          }
-          j++;
-        }
-        printf("]\n");
-      }
-#endif
       return 1;
     }
     if (reject) return 0;
+    /* Grows tapes if necessary */
+    for (i = 0; i < NUM_TAPES; i++) {
+      if (tm->tapes[i].head >= tm->tapeSize) {
+        tm->tapeSize += tm->tapeSize / 2;
+        for (j = 0; j < NUM_TAPES; j++) {
+          tm->tapes[j].tape = realloc(tm->tapes[j].tape, tm->tapeSize);
+          if (!tm->tapes[j].tape) fatalError("Out of Memory", 3);
+        }
+        break;
+      }
+    }
   }
   return -1; 
 }
@@ -424,23 +400,46 @@ struct Input {
   boolean valid;
 };
 
+int
+parse5ple(char* buffer, Quintuple* out) {
+  char delta;
+  if (sscanf(buffer, "(%d,%c)=(%d,%c,%c)\n", &out->entryState.num, &out->entry,  &out->outState.num, &out->output, &delta) != 5) {
+    return 1;
+  }
+
+  switch (delta) {
+  case 'L': out->shift = -1; break;
+  case 'R': out->shift = +1; break;
+  default:  out->shift = 0; break;
+  }
+  if (out->entry == 'B') out->entry = BLANK;
+  if (out->output == 'B') out->output = BLANK;
+  out->entryState.stage = out->outState.stage = A;
+  return 0;
+}
+
 struct Input
 readInput(FILE* in) {
   #define BUFFER_SIZE 1023
   struct Input input;
   int i, j;
-  char throwAway;
   char buffer[BUFFER_SIZE+1];
   char* tok;
   State Sf;
   boolean validEntry = false, validOutput = false;
   Quintuple quint;
   input.valid = true;
+  /* Reads in the first line containing the counts */
   fgets(buffer, BUFFER_SIZE, in);
-  sscanf(buffer, "%d %d %d %d\n", &input.nStates, &input.nSymbols, &input.nTapeSymbols, &input.nTransitions);
+  if (sscanf(buffer, "%d %d %d %d\n", &input.nStates, &input.nSymbols, &input.nTapeSymbols, &input.nTransitions) != 4) {
+    fatalError("Malformed first line", 4);
+  }
+
   input.nTapeSymbols += 1;
   input.nStates += 4;
   input.states = malloc(sizeof(*input.states) * input.nStates);
+
+  /* Reads in the second line, containing the states */
   fgets(buffer, BUFFER_SIZE, in);
   tok = strtok(buffer, " ");
   for (i = 0; i < input.nStates-4; i++) {
@@ -466,6 +465,7 @@ readInput(FILE* in) {
   input.states[input.nStates-1].num = Sf.num+3;
 
 
+  /* Reads in the third line, containing the input alphabet */
   fgets(buffer, BUFFER_SIZE, in);
   input.alphabet = malloc(input.nSymbols+1);
   tok = strtok(buffer, " ");
@@ -475,6 +475,8 @@ readInput(FILE* in) {
   }
   input.alphabet[input.nSymbols] = 0;
 
+
+  /* Reads in the third line, containing the tape alphabet */
   fgets(buffer, BUFFER_SIZE, in);
   input.tapeSymbols = malloc(input.nTapeSymbols+1);
   tok = strtok(buffer, " ");
@@ -482,42 +484,37 @@ readInput(FILE* in) {
     input.tapeSymbols[i] = tok[0];
     tok = strtok(NULL, " ");
   }
-  input.tapeSymbols[input.nTapeSymbols-1] = 0xff; /* Special "Start of Input/Output" symbol */
+  input.tapeSymbols[input.nTapeSymbols-1] = IO_START ; /* Special "Start of Input/Output" symbol */
   input.tapeSymbols[input.nTapeSymbols] = 0;
   /* 4 + 2z extra quintuples. 3 + 2z from the output standardizing, 1 extra required as Af from the Bennett paper */
   input.transitions = calloc(sizeof(*input.transitions), input.nTransitions + 4 + (2 * input.nTapeSymbols));
   j = 1;
+  /* Parse each quintuple */
   for (i = 0; i < input.nTransitions; i++) {
-    fscanf(in, "(%d,%c)=(%d,%c,%c)\n", &quint.entryState.num, &quint.entry,  &quint.outState.num, &quint.output, &throwAway);
-    switch (throwAway) {
-    case 'L': quint.shift = -1; break;
-    case 'R': quint.shift = +1; break;
-    default:  quint.shift = 0; break;
+    fgets(buffer, BUFFER_SIZE, in);
+    if (parse5ple(buffer, &quint)) {
+      fprintf(stderr, "%s\n", buffer);
+      fatalError("Malformed Quintuple", 5);
     }
-    if (quint.entry == 'B') quint.entry = BLANK;
-    if (quint.output == 'B') quint.output = BLANK;
-    quint.entryState.stage = quint.outState.stage = A;
-    validEntry             = (strchr(input.tapeSymbols, quint.entry) != NULL);  /* Checks the that read symbol is in the tape alphabet  */
-    validOutput            = (strchr(input.tapeSymbols, quint.output) != NULL); /* Checks the that write symbol is in the tape alphabet */ 
+    validEntry  = (strchr(input.tapeSymbols, quint.entry) != NULL);  /* Checks the that read symbol is in the tape alphabet  */
+    validOutput = (strchr(input.tapeSymbols, quint.output) != NULL); /* Checks the that write symbol is in the tape alphabet */ 
     if (!validEntry || !validOutput) {
-      print5ple(quint);
-      printf("5ple transition invalid: ");
+      fprintf(stderr, "%s\n", buffer);
       if (!validEntry) 
-        printf("%c character not in tape symbol list. ", quint.entry);
+        fprintf(stderr, "%c character not in tape symbol list. ", quint.entry);
       if (!validOutput) 
-        printf("%c character not in tape symbol list. ", quint.output);
-      printf("\n");
-      input.valid = false;
+        fprintf(stderr, "%c character not in tape symbol list. ", quint.output);
+      fatalError("Malformed Quintuple", 5);
     }
     quint.m = j + 1;
     input.transitions[j++] = quint;
   }
+  /* Reads the final input line */
   fgets(input.entry, BUFFER_SIZE, in);
   input.entry[strlen(input.entry)-1] = 0; /* Trim newline from fgets - breaks if line is longer than 1023 characters though */
   for (i = 0; i < strlen(input.entry); i++) {
     if (!strchr(input.alphabet, input.entry[i])) {
-      printf("Character %c of entry does not belong to the tape alphabet.\n", input.entry[i]);
-      input.valid = false;
+      fatalError("Invalid Input String", 6);
     }
   }
 
@@ -526,7 +523,7 @@ readInput(FILE* in) {
   quint.entryState = input.states[0];
   quint.outState = input.states[1];
   quint.entry = BLANK;
-  quint.output = 0xff;
+  quint.output = IO_START;
   quint.shift = +1;
   quint.m = 1;
   input.transitions[0] = quint;
@@ -571,7 +568,7 @@ readInput(FILE* in) {
   quint.entryState = input.states[input.nStates-3];
   quint.outState = input.states[input.nStates-2];
   quint.shift = 0;
-  quint.entry = 0xff;
+  quint.entry = IO_START;
   quint.output = BLANK;
   quint.m = j + 1;
   input.transitions[j++] = quint;
@@ -580,7 +577,7 @@ readInput(FILE* in) {
   quint.entryState = Sf;
   quint.outState = input.states[input.nStates-2];
   quint.shift = 0;
-  quint.entry = 0xff;
+  quint.entry = IO_START;
   quint.output = BLANK;
   quint.m = j + 1;
   input.transitions[j++] = quint;
@@ -593,8 +590,6 @@ readInput(FILE* in) {
   quint.shift = 0;
   quint.m = j + 1;
   input.transitions[j++] = quint;
-
-  printf("Total Transitions: %d. Expected Transitions: %d\n", j, input.nTransitions + (input.nTapeSymbols - 1) * 2 + 4);
 
   input.nTransitions = j;
   return input;
@@ -665,35 +660,35 @@ makeReversible(struct Input input) {
   }
   tm.state.stage = A; tm.state.num = 0;
   tm.acceptState.stage = C; tm.acceptState.num = 0;
-  for (i = 0; i < (4 * N + 2 * Z + 3); i++) {
-    print4ple(quadruples[i]);
-  }
   if (!initTuringMachine(&tm, (4 * N + 2 * Z + 3), quadruples)) {
-    printf("Invalid turing machine\n");
-    free(quadruples);
-    tm.quadruplesSize = 0;
+    fatalError("Invalid Turing Machine", 7);
   }
   return tm;
 }
 
+void
+checkForFlags(int argn, const char* argv[]) {
+  int i;
+  for (i = 0; i < argn; i++) {
+    if (argv[i][0] == 'p') runtimeFlags |= PRINT;
+  }
+}
+
 int
-main(int argn, char *argv[]) {
+main(int argn, const char *argv[]) {
   struct Input input = {0};
   TuringMachine tm =  {0};
+  checkForFlags(argn, argv);
   input = readInput(stdin);
   if (!input.valid) {
     printf("Invalid input\n");
-    return 1;
+    return 4;
   }
   tm = makeReversible(input);
   if (tm.quadruplesSize == 0) {
-    return 1;
+    return 5;
   }
   memcpy(tm.tapes[0].tape+1, input.entry, strlen(input.entry));
-  if (turingMachineGo(&tm)) {
-    printf("Accept\n");
-  } else {
-    printf("Reject\n");
-  }
-  return 0;
+  if (turingMachineGo(&tm)) return 0;
+  return 9;
 }
