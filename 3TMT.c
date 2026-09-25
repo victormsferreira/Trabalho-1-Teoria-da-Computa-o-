@@ -815,7 +815,7 @@ checkForFlags(int argn, const char* argv[]) {
   int i;
   for (i = 0; i < argn; i++) {
     if (argv[i][0] == 'p') runtimeFlags |= PRINT;
-    if (argv[i][0] == 'g') runtimeFlags |= PRINT;
+    if (argv[i][0] == 'g') runtimeFlags |= GRAPHICS;
   }
 }
 
@@ -834,8 +834,11 @@ main(int argn, const char *argv[]) {
     return 5;
   }
   memcpy(tm.tapes[0].tape+1, input.entry, strlen(input.entry));
-  if (runtimeFlags & GRAPHICS) if (turingMachineGoGFX(&tm)) return 0;
-  else if (turingMachineGo(&tm)) return 0;
+  if (runtimeFlags & GRAPHICS) {
+    if (turingMachineGoGFX(&tm)) return 0;
+    return 9;
+  }
+  if (turingMachineGo(&tm)) return 0;
   return 9;
 }
 
