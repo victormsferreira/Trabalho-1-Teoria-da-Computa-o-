@@ -428,10 +428,11 @@ struct Input
 readInput(FILE* in) {
   #define BUFFER_SIZE 1023
   struct Input input;
-  int i;
+  int i, j;
   char throwAway;
   char buffer[BUFFER_SIZE+1];
   char* tok;
+  State Sf;
   boolean validEntry = false, validOutput = false;
   Quintuple quint;
   input.valid = true;
@@ -447,16 +448,23 @@ readInput(FILE* in) {
     input.states[i+1].num = atoi(tok);
     tok = strtok(NULL, " ");
   }
+
+
+  /* Necessary extra states */
   input.states[0].stage = A;
   input.states[0].num = 0;
+
+  Sf = input.states[input.nStates-4];
+
   input.states[input.nStates-3].stage = A;
-  input.states[input.nStates-3].num = input.states[input.nStates-4].num+1;
+  input.states[input.nStates-3].num = Sf.num+1;
 
   input.states[input.nStates-2].stage = A;
-  input.states[input.nStates-2].num = input.states[input.nStates-3].num+1;
+  input.states[input.nStates-2].num = Sf.num+2;
 
   input.states[input.nStates-1].stage = A;
-  input.states[input.nStates-1].num = input.states[input.nStates-2].num+1;
+  input.states[input.nStates-1].num = Sf.num+3;
+
 
   fgets(buffer, BUFFER_SIZE, in);
   input.alphabet = malloc(input.nSymbols+1);
@@ -474,9 +482,11 @@ readInput(FILE* in) {
     input.tapeSymbols[i] = tok[0];
     tok = strtok(NULL, " ");
   }
-  input.tapeSymbols[input.nTapeSymbols-1] = 0xff;
+  input.tapeSymbols[input.nTapeSymbols-1] = 0xff; /* Special "Start of Input/Output" symbol */
   input.tapeSymbols[input.nTapeSymbols] = 0;
-  input.transitions = calloc(sizeof(*input.transitions), input.nTransitions + 3 + input.nTapeSymbols);
+  /* 4 + 2z extra quintuples. 3 + 2z from the output standardizing, 1 extra required as Af from the Bennett paper */
+  input.transitions = calloc(sizeof(*input.transitions), input.nTransitions + 4 + (2 * input.nTapeSymbols));
+  j = 1;
   for (i = 0; i < input.nTransitions; i++) {
     fscanf(in, "(%d,%c)=(%d,%c,%c)\n", &quint.entryState.num, &quint.entry,  &quint.outState.num, &quint.output, &throwAway);
     switch (throwAway) {
@@ -487,29 +497,32 @@ readInput(FILE* in) {
     if (quint.entry == 'B') quint.entry = BLANK;
     if (quint.output == 'B') quint.output = BLANK;
     quint.entryState.stage = quint.outState.stage = A;
-    validEntry      = (strchr(input.tapeSymbols, quint.entry) != NULL);
-    validOutput     = (strchr(input.tapeSymbols, quint.output) != NULL);
+    validEntry             = (strchr(input.tapeSymbols, quint.entry) != NULL);  /* Checks the that read symbol is in the tape alphabet  */
+    validOutput            = (strchr(input.tapeSymbols, quint.output) != NULL); /* Checks the that write symbol is in the tape alphabet */ 
     if (!validEntry || !validOutput) {
       print5ple(quint);
       printf("5ple transition invalid: ");
       if (!validEntry) 
-        printf("%c character not in transition alphabet. ", quint.entry);
+        printf("%c character not in tape symbol list. ", quint.entry);
       if (!validOutput) 
-        printf("%c character not in transition alphabet. ", quint.output);
+        printf("%c character not in tape symbol list. ", quint.output);
       printf("\n");
       input.valid = false;
     }
-    quint.m = i + 2;
-    input.transitions[i+1] = quint;
+    quint.m = j + 1;
+    input.transitions[j++] = quint;
   }
   fgets(input.entry, BUFFER_SIZE, in);
-  input.entry[strlen(input.entry)-1] = 0;
+  input.entry[strlen(input.entry)-1] = 0; /* Trim newline from fgets - breaks if line is longer than 1023 characters though */
   for (i = 0; i < strlen(input.entry); i++) {
     if (!strchr(input.alphabet, input.entry[i])) {
       printf("Character %c of entry does not belong to the tape alphabet.\n", input.entry[i]);
       input.valid = false;
     }
   }
+
+  /* Writes the Start character to the start of the tape. Note that this is being combined with the 1st special quintuple from the paper
+   * (A1b -> b + A2).  */
   quint.entryState = input.states[0];
   quint.outState = input.states[1];
   quint.entry = BLANK;
@@ -518,16 +531,9 @@ readInput(FILE* in) {
   quint.m = 1;
   input.transitions[0] = quint;
 
-  quint.entryState = input.states[input.nStates-4];
-  quint.outState = input.states[input.nStates-3];
-  quint.entry = BLANK;
-  quint.output = BLANK;
-  quint.shift = -1;
-  quint.m = input.nTransitions + 2;
-  input.transitions[input.nTransitions+1] = quint;
-
-  for (i = 0; i < input.nTapeSymbols-1; i++) {
-    quint.entryState = input.states[input.nStates-3];
+  /* From the diagram in the repo: Sf * -> * - A1 */
+  quint.entryState = Sf;
+  for (i = 0; i < input.nTapeSymbols - 1; i++) { 
     if (input.tapeSymbols[i] != 'B') {
       quint.outState = input.states[input.nStates-3];
       quint.shift = -1;
@@ -539,26 +545,58 @@ readInput(FILE* in) {
       quint.entry = BLANK;
       quint.output = BLANK;
     }
-    quint.m = input.nTransitions + 3 + i;
-    input.transitions[input.nTransitions+2+i] = quint;
+    quint.m = j + 1;
+    input.transitions[j++] = quint;
   }
+
+  /* From the diagram in the repo: A1 * -> * - A1 */
+  quint.entryState = input.states[input.nStates-3];
+  for (i = 0; i < input.nTapeSymbols - 1; i++) { 
+    if (input.tapeSymbols[i] != 'B') {
+      quint.outState = input.states[input.nStates-3];
+      quint.shift = -1;
+      quint.entry = input.tapeSymbols[i];
+      quint.output = input.tapeSymbols[i];
+    } else {
+      quint.outState = input.states[input.nStates-3];
+      quint.shift = -1;
+      quint.entry = BLANK;
+      quint.output = BLANK;
+    }
+    quint.m = j + 1;
+    input.transitions[j++] = quint;
+  }
+
+  /* A1 $ -> B S A2 */
   quint.entryState = input.states[input.nStates-3];
   quint.outState = input.states[input.nStates-2];
   quint.shift = 0;
   quint.entry = 0xff;
   quint.output = BLANK;
-  quint.m = input.nTransitions + 2 + input.nTapeSymbols;
-  input.transitions[input.nTransitions+1+input.nTapeSymbols] = quint;
+  quint.m = j + 1;
+  input.transitions[j++] = quint;
 
+  /* S1 $ -> B S A2 */
+  quint.entryState = Sf;
+  quint.outState = input.states[input.nStates-2];
+  quint.shift = 0;
+  quint.entry = 0xff;
+  quint.output = BLANK;
+  quint.m = j + 1;
+  input.transitions[j++] = quint;
+
+  /* A2 B -> B 0 Af */
   quint.entryState = input.states[input.nStates-2];
   quint.outState = input.states[input.nStates-1];
   quint.entry = BLANK;
   quint.output = BLANK;
   quint.shift = 0;
-  quint.m = input.nTransitions + 3 + input.nTapeSymbols;
-  input.transitions[input.nTransitions + 2 + input.nTapeSymbols] = quint;
+  quint.m = j + 1;
+  input.transitions[j++] = quint;
 
-  input.nTransitions += 3 + input.nTapeSymbols;
+  printf("Total Transitions: %d. Expected Transitions: %d\n", j, input.nTransitions + (input.nTapeSymbols - 1) * 2 + 4);
+
+  input.nTransitions = j;
   return input;
 }
 
@@ -618,7 +656,6 @@ makeReversible(struct Input input) {
       PUSH_4PLE(x, N, x, x, N, x, b2, b2p);
     }
   }
-
   PUSH_4PLE(BLANK, N, BLANK, BLANK, N, BLANK, b2, cf); /* B2[b N b] -> [b N b]Cf */
 
   /* Create Stage 3 (Retrace) quadruples */
