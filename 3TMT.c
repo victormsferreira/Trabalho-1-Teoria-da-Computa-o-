@@ -1,10 +1,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "tigr.h"
 
 static enum RuntimeFlags {
-  PRINT = 1
-} runtimeFlags = 0;
+  PRINT = 1 << 0,
+  GRAPHICS = 1 << 2,
+} runtimeFlags = GRAPHICS;
 
 /* Special Characters */
 #define NO_READ '/'
@@ -17,6 +19,10 @@ static enum RuntimeFlags {
 typedef char boolean;
 #define true (1 == 1)
 #define false (!true)
+
+struct Graphics {
+  Tigr* screen;
+} gfx;
 
 
 enum TapeType {
@@ -92,6 +98,7 @@ typedef struct TuringMachine {
   int tapeSize;
   State state;
   State acceptState;
+  boolean started;
 } TuringMachine;
 
 void
@@ -382,6 +389,143 @@ turingMachineGo(TuringMachine* tm) {
         break;
       }
     }
+  }
+  return -1; 
+}
+
+void
+drawChar(unsigned char c, int x, int y) {
+  char buffer[2] = {0, 0};
+  if (c >= 0x20 && c <= 0x7e) {
+    buffer[0] = c;
+    tigrPrint(gfx.screen, tfont, x, y, tigrRGB(0xbe, 0xbe, 0xbe), buffer);
+    return;
+  } 
+  if (c == 0xff) {
+    buffer[0] = '$';
+    tigrPrint(gfx.screen, tfont, x, y, tigrRGB(0x7e, 0x00, 0x00), buffer);
+    return;
+  }
+}
+
+void
+drawNum(int n, int x, int y) {
+  char buffer[32] = {0};
+  snprintf(buffer, 31, "%d", n);
+  tigrPrint(gfx.screen, tfont, x, y, tigrRGB(0xbe, 0xbe, 0xbe), buffer);
+}
+
+void
+turingMachineDraw(TuringMachine* tm) {
+  const char* tapeNames[NUM_TAPES] = { "INPUT", "HISTORY", "OUTPUT" };
+  int i, j;   
+  const int TAPE_HEIGHT = 240 / 8;
+  const int TAPE_OFFSET = 240 / 6;
+  int y = TAPE_OFFSET / 2;
+  int x;
+  unsigned char c;
+  int n;
+  int ind;
+  const int HEADX = 8 + 2 * (TAPE_HEIGHT + 3);
+  for (i = 0; i < NUM_TAPES; i++) {
+    x = 8;
+    tigrFillRect(gfx.screen, x-4, y-12, (9 * (TAPE_HEIGHT + 3)) + 8, 12, tigrRGB(0x00, 0x00, 0x7e));
+    tigrFillRect(gfx.screen, x-4, y-2, (9 * (TAPE_HEIGHT + 3)) + 8, TAPE_HEIGHT+8, tigrRGB(0xbe, 0xbe, 0xbe));
+    tigrRect(gfx.screen, x-4, y-12, (9 * (TAPE_HEIGHT + 3)) + 8, 12, tigrRGB(0x7e, 0x7e, 0x7e));
+    tigrRect(gfx.screen, x-4, y-1, (9 * (TAPE_HEIGHT + 3)) + 8, TAPE_HEIGHT+6, tigrRGB(0x7e, 0x7e, 0x7e));
+
+    tigrPrint(gfx.screen, tfont, x, y - 10, tigrRGB(0xbe, 0xbe, 0xbe), tapeNames[i]);
+    for (j = 0; j < 9; j++) {
+      tigrFillRect(gfx.screen, x, y+1, TAPE_HEIGHT, TAPE_HEIGHT, tigrRGB(0xff,0xff,0xff));
+      tigrRect(gfx.screen, x, y+1, TAPE_HEIGHT, TAPE_HEIGHT, tigrRGB(0,0,0));
+      ind = tm->tapes[i].head + j - 2;
+      if (ind >= 0) {
+        n = tm->tapes[i].tape[ind];
+        c = n;
+        if (i == HISTORY && n)
+          drawNum(c, x+5, y+5);
+        else
+          drawChar(c, x+5, y+5);
+      }
+      tigrFillRect(gfx.screen, HEADX + TAPE_HEIGHT / 4, y + 3 * TAPE_HEIGHT / 4, TAPE_HEIGHT / 2, TAPE_HEIGHT / 3, tigrRGB(0xbe, 0xbe, 0xbe));
+      tigrRect(gfx.screen, HEADX + TAPE_HEIGHT / 4, y + 3 * TAPE_HEIGHT / 4, TAPE_HEIGHT / 2, TAPE_HEIGHT / 3, tigrRGB(0x00, 0x00, 0x00));
+
+      x += TAPE_HEIGHT + 3;
+    }
+    y += TAPE_HEIGHT + TAPE_OFFSET;
+  }
+
+}
+
+int
+turingMachineGoGFX(TuringMachine* tm) {
+  const int TICK_RATE = 10;
+  boolean reject = false;
+  int i, j;
+  boolean done = false;
+  boolean accepted = false;
+  gfx.screen = tigrWindow(320, 240, "Reversible Turing Machine", 0);
+  int tick = 0;
+  const int RESULT_X = 8;
+  const int RESULT_Y = 240 - 32;
+  const int RESULT_W = 96;
+  const int RESULT_H = 24;
+  if (runtimeFlags & PRINT) turingMachinePrint(tm);
+  while (!tigrClosed(gfx.screen)) {
+    tigrClear(gfx.screen, tigrRGB(0x04, 0x7e, 0x7e));
+    turingMachineDraw(tm);
+    if (tigrKeyDown(gfx.screen, TK_SPACE)) tm->started = true;
+    reject = true;
+    if (!done && tm->started) {
+      tick++;
+      if (tick >= TICK_RATE) {
+        tick = 0;
+        for (i = 0; i < tm->quadruplesSize; i++) {
+          if (shouldRun4ple(tm, tm->quadruples[i])) {
+            apply4ple(tm, tm->quadruples+i);
+            reject = false;
+            break;
+          }
+        }
+        if (runtimeFlags & PRINT) turingMachinePrint(tm);
+        if (statesEqual(tm->state, tm->acceptState)) {
+          accepted = true;
+          done = true;
+        }
+        else if (reject) {
+          accepted = false;
+          done = true;
+        }
+        /* Grows tapes if necessary */
+        for (i = 0; i < NUM_TAPES; i++) {
+          if (tm->tapes[i].head >= tm->tapeSize) {
+            tm->tapeSize += tm->tapeSize / 2;
+            for (j = 0; j < NUM_TAPES; j++) {
+              tm->tapes[j].tape = realloc(tm->tapes[j].tape, tm->tapeSize);
+              if (!tm->tapes[j].tape) fatalError("Out of Memory", 3);
+            }
+            break;
+          }
+        }
+      }
+    }
+    if (done) {
+      if (accepted) {
+        tigrFillRect(gfx.screen, RESULT_X, RESULT_Y, RESULT_W, RESULT_H, tigrRGB(0x06, 0xff, 0x04));
+        tigrRect(gfx.screen, RESULT_X, RESULT_Y, RESULT_W, RESULT_H, tigrRGB(0x04, 0x7e, 0x00));
+        tigrPrint(gfx.screen, tfont, RESULT_X+4, RESULT_Y+4, tigrRGB(0xbe, 0xbe, 0xbe), "Accepted!");
+
+      } else {
+        tigrFillRect(gfx.screen, RESULT_X, RESULT_Y, RESULT_W, RESULT_H, tigrRGB(0xfe, 0x00, 0x00));
+        tigrRect(gfx.screen, RESULT_X, RESULT_Y, RESULT_W, RESULT_H, tigrRGB(0x7e, 0x00, 0x00));
+        tigrPrint(gfx.screen, tfont, RESULT_X+4, RESULT_Y+4, tigrRGB(0xbe, 0xbe, 0xbe), "Rejected!");
+      }
+    } else {
+      tigrFillRect(gfx.screen, RESULT_X, RESULT_Y, RESULT_W, RESULT_H, tigrRGB(0x7e, 0x7e, 0x7e));
+      tigrRect(gfx.screen, RESULT_X, RESULT_Y, RESULT_W, RESULT_H, tigrRGB(0x00, 0x00, 0x00));
+      tigrPrint(gfx.screen, tfont, RESULT_X+4, RESULT_Y+4, tigrRGB(0xbe, 0xbe, 0xbe), "Computing...");
+    }
+    tigrUpdate(gfx.screen);
   }
   return -1; 
 }
@@ -689,6 +833,8 @@ main(int argn, const char *argv[]) {
     return 5;
   }
   memcpy(tm.tapes[0].tape+1, input.entry, strlen(input.entry));
-  if (turingMachineGo(&tm)) return 0;
+  if (runtimeFlags & GRAPHICS) if (turingMachineGoGFX(&tm)) return 0;
+  else if (turingMachineGo(&tm)) return 0;
   return 9;
 }
+
