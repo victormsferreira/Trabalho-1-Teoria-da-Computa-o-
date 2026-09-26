@@ -856,7 +856,7 @@ main(int argn, const char *argv[]) {
     input = readInput(stdin);
   } else {
     inF = fopen(argv[argn-1], "r");
-    if (!inF) {
+    if (!inF)
       fatalError("Input file does not exist", 8);
     input = readInput(inF);
     fclose(inF);
