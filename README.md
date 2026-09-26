@@ -1,5 +1,23 @@
 # Máquina de Turing Reversível
 
+## Modo de Uso
+O simulador pode ser executado da linha de comando com 3 flags:
+
+- p: Imprime o estado das fitas para stdout a cada passo da máquina
+- g: Visualização gráfica
+- s: Lê a entrada de stdin ao invés de um arquivo
+
+Caso s não esteja ativo, o simulador vai ler a entrada do arquivo passado como o último argumento.
+
+Caso a string de entrada seja aceita pela máquina, o programa retornará o código de saida 0. Caso
+seja rejeitada ou se algum erro ocorre durante a leitura ou execução, retornara um código de saída > 0
+
+Exemplo de uso:
+
+`./simulador -gs < entrada-quintupla.txt && echo Aceitado || echo Rejeitado`
+
+
+
 ## Padronização de Entrada e Saída
 
 ```

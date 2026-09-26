@@ -6,6 +6,7 @@
 static enum RuntimeFlags {
   PRINT = 1 << 0,
   GRAPHICS = 1 << 2,
+  STDIN = 1 << 3
 } runtimeFlags = 0;
 
 /* Special Characters */
@@ -527,7 +528,7 @@ turingMachineGoGFX(TuringMachine* tm) {
     }
     tigrUpdate(gfx.screen);
   }
-  return -1; 
+  return accepted; 
 }
 
 
@@ -834,22 +835,32 @@ makeReversible(struct Input input) {
 
 void
 checkForFlags(int argn, const char* argv[]) {
-  int i;
+  int i, j;
   for (i = 0; i < argn; i++) {
-    if (argv[i][0] == 'p') runtimeFlags |= PRINT;
-    if (argv[i][0] == 'g') runtimeFlags |= GRAPHICS;
+    if (argv[i][0] != '-') continue;
+    for (j = 1; j < strlen(argv[i]); j++) {
+      if (argv[i][j] == 'p') runtimeFlags |= PRINT;
+      if (argv[i][j] == 'g') runtimeFlags |= GRAPHICS;
+      if (argv[i][j] == 's') runtimeFlags |= STDIN;
+    }
   }
 }
 
 int
 main(int argn, const char *argv[]) {
+  FILE* inF;
   struct Input input = {0};
   TuringMachine tm =  {0};
   checkForFlags(argn, argv);
-  input = readInput(stdin);
+  if (runtimeFlags & STDIN)
+    inF = stdin;
+  else
+    inF = fopen(argv[argn-1], "r");
+  input = readInput(inF);
+  if (!(runtimeFlags & STDIN))
+    fclose(inF);
   if (!input.valid) {
-    printf("Invalid input\n");
-    return 4;
+    fatalError("Invalid input", 4);
   }
   tm = makeReversible(input);
   if (tm.quadruplesSize == 0) {
