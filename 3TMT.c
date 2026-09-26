@@ -852,13 +852,15 @@ main(int argn, const char *argv[]) {
   struct Input input = {0};
   TuringMachine tm =  {0};
   checkForFlags(argn, argv);
-  if (runtimeFlags & STDIN)
-    inF = stdin;
-  else
+  if (runtimeFlags & STDIN) {
+    input = readInput(stdin);
+  } else {
     inF = fopen(argv[argn-1], "r");
-  input = readInput(inF);
-  if (!(runtimeFlags & STDIN))
+    if (!inF) {
+      fatalError("Input file does not exist", 8);
+    input = readInput(inF);
     fclose(inF);
+  }
   if (!input.valid) {
     fatalError("Invalid input", 4);
   }
