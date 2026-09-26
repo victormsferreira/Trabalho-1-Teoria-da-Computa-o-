@@ -569,6 +569,7 @@ readInput(FILE* in) {
   int i, j;
   char buffer[BUFFER_SIZE+1];
   char* tok;
+  char* endptr;
   State Sf;
   boolean validEntry = false, validOutput = false;
   Quintuple quint;
@@ -585,10 +586,13 @@ readInput(FILE* in) {
 
   /* Reads in the second line, containing the states */
   fgets(buffer, BUFFER_SIZE, in);
-  tok = strtok(buffer, " ");
+  buffer[strlen(buffer)-1] = 0;
+  tok = strtok(buffer, " \n\t");
   for (i = 0; i < input.nStates-4; i++) {
     input.states[i+1].stage = A;
-    input.states[i+1].num = atoi(tok);
+    input.states[i+1].num = strtol(tok, &endptr, 10);
+    if (endptr == tok)
+      fatalError("Only numerical states are allowed\n", 6);
     tok = strtok(NULL, " ");
   }
 
@@ -611,10 +615,19 @@ readInput(FILE* in) {
 
   /* Reads in the third line, containing the input alphabet */
   fgets(buffer, BUFFER_SIZE, in);
+  buffer[strlen(buffer)-1] = 0;
   input.alphabet = malloc(input.nSymbols+1);
-  tok = strtok(buffer, " ");
+  tok = strtok(buffer, " \n\t");
   for (i = 0; i < input.nSymbols; i++) {
+    if (strlen(tok) > 1)
+      fatalError("Only single-character symbols are allowed", 7);
     input.alphabet[i] = tok[0];
+    if (input.alphabet[i] == SHIFT_STAY)
+      fatalError("Trying to use reversed symbol '.' in input alphabet", 7);
+    if (input.alphabet[i] == SHIFT_RIGHT)
+      fatalError("Trying to use reversed symbol '+' in input alphabet", 7);
+    if (input.alphabet[i] == SHIFT_LEFT)
+      fatalError("Trying to use reversed symbol '-' in input alphabet", 7);
     tok = strtok(NULL, " ");
   }
   input.alphabet[input.nSymbols] = 0;
@@ -622,10 +635,19 @@ readInput(FILE* in) {
 
   /* Reads in the third line, containing the tape alphabet */
   fgets(buffer, BUFFER_SIZE, in);
+  buffer[strlen(buffer)-1] = 0;
   input.tapeSymbols = malloc(input.nTapeSymbols+1);
-  tok = strtok(buffer, " ");
+  tok = strtok(buffer, " \n\t");
   for (i = 0; i < input.nTapeSymbols-1; i++) {
+    if (strlen(tok) > 1)
+      fatalError("Only single-character symbols are allowed", 7);
     input.tapeSymbols[i] = tok[0];
+    if (input.tapeSymbols[i] == SHIFT_STAY)
+      fatalError("Trying to use reversed symbol '.' in tape alphabet", 7);
+    if (input.tapeSymbols[i] == SHIFT_RIGHT)
+      fatalError("Trying to use reversed symbol '+' in tape alphabet", 7);
+    if (input.tapeSymbols[i] == SHIFT_LEFT)
+      fatalError("Trying to use reversed symbol '-' in tape alphabet", 7);
     tok = strtok(NULL, " ");
   }
   input.tapeSymbols[input.nTapeSymbols-1] = IO_START ; /* Special "Start of Input/Output" symbol */
